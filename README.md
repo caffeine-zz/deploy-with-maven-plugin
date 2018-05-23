@@ -7,7 +7,9 @@ Deploy 'artifactory-maven-plugin-example' to the Artifactory repository
 
 ## Requirements
 
-Jenkins with Maven and Artifactory plugin
+- Jenkins with Maven and Artifactory plugin
+- Kubernetes cluster on GCE
+(min configuration 2 g1-small nodes)
 
 ## Usege
 
