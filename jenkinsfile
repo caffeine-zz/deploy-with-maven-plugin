@@ -1,0 +1,47 @@
+node {
+
+    stage('Get kubectl') {
+        sh "wget -q https://storage.googleapis.com/kubernetes-release/release/v1.10.0/bin/linux/amd64/kubectl"
+        sh "chmod +x ./kubectl"
+    }
+
+    stage('Get helm') {
+        sh "wget -q https://storage.googleapis.com/kubernetes-helm/helm-v2.9.1-linux-amd64.tar.gz"
+        sh "tar -zxvf helm-v2.9.1-linux-amd64.tar.gz"
+        sh "mv linux-amd64/helm ."
+    }
+
+    stage('Make kubeconfig') {
+        sh "./kubectl config --kubeconfig=k8s set-cluster k8s --server=$SERVER_URL --insecure-skip-tls-verify"
+        sh "./kubectl config --kubeconfig=k8s set-credentials admin --username=$USERNAME --password=$PASSWORD"
+        sh "./kubectl config --kubeconfig=k8s set-context default --cluster=k8s --namespace=default --user=$USERNAME"
+        sh "./kubectl config --kubeconfig=k8s use-context default"
+    }
+
+    stage('Setup Artifactory repo') {
+        withEnv(["KUBECONFIG=k8s"]) {
+          sh "./helm init"
+          sh "./kubectl create serviceaccount --namespace kube-system tiller"
+          sh "./kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=kube-system:tiller"
+          sh "./kubectl patch deploy --namespace kube-system tiller-deploy --patch 'spec:\n template:\n  spec:\n   serviceAccount: tiller'"
+          sh "./helm init --service-account tiller --upgrade"
+          sh "sleep 15"
+          sh "./helm install --name artifactory --set artifactory.image.repository=docker.bintray.io/jfrog/artifactory-oss stable/artifactory"
+        }
+    }
+
+    stage ('Clone project-examples') {
+        git url: 'https://github.com/jfrogdev/project-examples.git'
+        withEnv(["KUBECONFIG=k8s"]) {
+          sh "sleep 40"
+          sh "sed -i s/localhost:8081/`./kubectl get svc --namespace default artifactory-artifactory-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`/g artifactory-maven-plugin-example/pom.xml"
+          sh "sed -i s/libs-release-local/example-repo-local/g artifactory-maven-plugin-example/pom.xml"
+          sh "sed -i 77d artifactory-maven-plugin-example/pom.xml"
+        }
+    }
+
+    stage ('Build and publish') {
+        sh "sleep 360"
+        sh "mvn deploy -Dbuildnumber=1 -s artifactory-maven-plugin-example/settings.xml -f artifactory-maven-plugin-example/pom.xml"
+    }
+}
